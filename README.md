@@ -71,3 +71,7 @@ For each input, only the objects reachable from its pages are copied, shifted in
 
 - Encrypted PDFs are rejected; decrypt them first.
 - The inputs' existing bookmarks, form fields (AcroForm), and named destinations are not carried over.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
