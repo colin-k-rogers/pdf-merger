@@ -30,6 +30,35 @@ Or from a local checkout:
 cargo install --path .
 ```
 
+## Web app (installable PWA)
+
+The same merge code compiles to WebAssembly and runs in the browser, so
+Chromebooks, phones, and desktops can merge PDFs with no install and no upload.
+Everything happens on the device, and once installed it works offline. Pick
+individual PDFs or a whole folder (its top-level PDFs, in the order the browser
+lists them), or drag either onto the page. Reorder the list by dragging rows or
+with the ↑/↓ buttons before merging.
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.129   # must match Cargo.lock
+./scripts/build-web.sh
+python3 -m http.server -d web 8000                 # then open http://localhost:8000
+```
+
+Serve the `web/` directory from any static host over HTTPS (for example GitHub
+Pages) and Chrome will offer to install it. The service worker is network-first,
+so online users always get the latest files; bump `CACHE` in `web/sw.js` only if
+you change its precache list.
+
+Once Pages is enabled (below), every merge to `main` that touches the app
+deploys it automatically, so users just open the URL, no build needed.
+
+Each [release](https://github.com/colin-k-rogers/pdf-merger/releases/latest)
+also includes `pdf-merger-web-<version>.zip`: the built app, ready to unzip onto
+any static HTTPS host. (Opening `index.html` straight from disk won't work,
+because browsers block WebAssembly and service workers on `file://`.)
+
 ## Usage
 
 ```bash
@@ -71,6 +100,21 @@ For each input, only the objects reachable from its pages are copied, shifted in
 
 - Encrypted PDFs are rejected; decrypt them first.
 - The inputs' existing bookmarks, form fields (AcroForm), and named destinations are not carried over.
+
+## Releasing
+
+Releases are built in CI, so nothing needs compiling locally:
+
+1. Bump `version` in `Cargo.toml`, commit, and merge to `main`.
+2. Tag and push: `git tag v<version> && git push origin v<version>`.
+
+The [Release workflow](.github/workflows/release.yml) builds the static Linux
+binaries and the web zip and publishes the GitHub release. You can also run it
+from the Actions tab to build without publishing. `scripts/release.sh` does the
+same thing locally if you prefer (needs zig, cargo-zigbuild, wasm-bindgen-cli).
+
+One-time setup for the hosted web app: Settings → Pages → Source: **GitHub
+Actions**. The [Pages workflow](.github/workflows/pages.yml) then deploys `web/`.
 
 ## License
 
