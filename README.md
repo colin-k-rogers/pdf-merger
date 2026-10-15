@@ -35,8 +35,9 @@ cargo install --path .
 The same merge code compiles to WebAssembly and runs in the browser, so
 Chromebooks, phones, and desktops can merge PDFs with no install and no upload.
 Everything happens on the device, and once installed it works offline. Pick
-individual PDFs or a whole folder (its top-level PDFs, sorted by name), or drag
-either onto the page.
+individual PDFs or a whole folder (its top-level PDFs, in the order the browser
+lists them), or drag either onto the page. Reorder the list by dragging rows or
+with the ↑/↓ buttons before merging.
 
 ```sh
 rustup target add wasm32-unknown-unknown

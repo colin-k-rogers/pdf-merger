@@ -29,8 +29,6 @@ function isPdf(file) {
   return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
 }
 
-const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
-
 function addFiles(incoming) {
   const pdfs = [...incoming].filter(isPdf);
   const rejected = incoming.length - pdfs.length;
@@ -39,9 +37,9 @@ function addFiles(incoming) {
   setStatus(rejected ? `Ignored ${rejected} file(s) that are not PDFs.` : "", rejected > 0);
 }
 
-/** Add the PDFs directly inside a folder (not subfolders), sorted by name. */
+/** Add the PDFs directly inside a folder (not subfolders), in the order the browser lists them. */
 function addFolder(name, contents) {
-  const pdfs = [...contents].filter(isPdf).sort(byName);
+  const pdfs = [...contents].filter(isPdf);
   files.push(...pdfs);
   render();
   setStatus(
@@ -86,6 +84,15 @@ function move(index, delta) {
   render();
 }
 
+/** Move the file at `from` so it ends up at index `to`. */
+function moveTo(from, to) {
+  if (from === to) return;
+  files.splice(to, 0, ...files.splice(from, 1));
+  render();
+}
+
+let dragFrom = null;
+
 function render() {
   els.list.replaceChildren(
     ...files.map((file, i) => {
@@ -98,6 +105,31 @@ function render() {
       size.className = "size";
       size.textContent = formatSize(file.size);
       li.append(name, size);
+      if (!busy) {
+        li.draggable = true;
+        li.addEventListener("dragstart", (e) => {
+          dragFrom = i;
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", file.name);
+          li.classList.add("dragging");
+        });
+        li.addEventListener("dragend", () => {
+          dragFrom = null;
+          li.classList.remove("dragging");
+          for (const el of els.list.children) el.classList.remove("drop-target");
+        });
+        li.addEventListener("dragover", (e) => {
+          if (dragFrom === null) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          for (const el of els.list.children) el.classList.toggle("drop-target", el === li);
+        });
+        li.addEventListener("drop", (e) => {
+          if (dragFrom === null) return;
+          e.preventDefault();
+          moveTo(dragFrom, i);
+        });
+      }
       for (const [label, aria, action, disabled] of [
         ["↑", "Move up", () => move(i, -1), i === 0],
         ["↓", "Move down", () => move(i, 1), i === files.length - 1],
