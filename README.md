@@ -46,8 +46,14 @@ python3 -m http.server -d web 8000                 # then open http://localhost:
 ```
 
 Serve the `web/` directory from any static host over HTTPS (for example GitHub
-Pages) and Chrome will offer to install it. When you change files in `web/`,
-bump `CACHE` in `web/sw.js` so installed copies pick up the update.
+Pages) and Chrome will offer to install it. The service worker is network-first,
+so online users always get the latest files; bump `CACHE` in `web/sw.js` only if
+you change its precache list.
+
+Each [release](https://github.com/colin-k-rogers/pdf-merger/releases/latest)
+also includes `pdf-merger-web-<version>.zip`: the built app, ready to unzip onto
+any static HTTPS host. (Opening `index.html` straight from disk won't work,
+because browsers block WebAssembly and service workers on `file://`.)
 
 ## Usage
 

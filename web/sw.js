@@ -1,6 +1,7 @@
-// Cache-first service worker so the app works offline once loaded.
-// Bump CACHE when shipping new files so old copies are dropped.
-const CACHE = "pdf-merger-v2";
+// Network-first service worker: online loads always get the newest files and
+// refresh the cache; offline loads fall back to the cache. The precache below
+// makes the first offline load work. Bump CACHE only when SHELL changes.
+const CACHE = "pdf-merger-v3";
 const SHELL = [
   "./",
   "index.html",
@@ -26,8 +27,17 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") return;
+  const { request } = event;
+  if (request.method !== "GET" || new URL(request.url).origin !== self.location.origin) return;
   event.respondWith(
-    caches.match(event.request, { ignoreSearch: true }).then((hit) => hit || fetch(event.request)),
+    fetch(request, { cache: "no-cache" })
+      .then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE).then((c) => c.put(request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(request, { ignoreSearch: true })),
   );
 });

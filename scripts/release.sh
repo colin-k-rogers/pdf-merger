@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Build static Linux binaries (x86_64 + aarch64, musl) and publish a GitHub release.
+# Build static Linux binaries (x86_64 + aarch64, musl) plus the packaged web app
+# (PWA zip) and publish a GitHub release.
 # Usage: scripts/release.sh [--dry-run]   (version comes from Cargo.toml)
-# Needs: rustup, zig, cargo-zigbuild, gh (authenticated).
+# Needs: rustup, zig, cargo-zigbuild, wasm-bindgen-cli (version from Cargo.lock),
+# zip, gh (authenticated).
 #   brew install zig gh && cargo install cargo-zigbuild
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -9,7 +11,7 @@ cd "$(dirname "$0")/.."
 dry_run=0
 [[ "${1:-}" == "--dry-run" ]] && dry_run=1
 
-for tool in cargo rustup zig cargo-zigbuild gh; do
+for tool in cargo rustup zig cargo-zigbuild wasm-bindgen zip gh; do
   command -v "$tool" >/dev/null || { echo "missing: $tool" >&2; exit 1; }
 done
 
@@ -26,7 +28,7 @@ fi
 
 dist=target/dist
 rm -rf "$dist" && mkdir -p "$dist"
-rustup target add "${targets[@]}"
+rustup target add "${targets[@]}" wasm32-unknown-unknown
 
 assets=()
 for t in "${targets[@]}"; do
@@ -38,7 +40,18 @@ for t in "${targets[@]}"; do
   tar -C "$stage" -czf "$dist/$name.tar.gz" pdf-merger README.md
   assets+=("$dist/$name.tar.gz")
 done
-(cd "$dist" && shasum -a 256 ./*.tar.gz > SHA256SUMS)
+# Web app: static files to host over HTTPS (see README). Built last-to-first so
+# a wasm toolchain problem fails before anything is tagged.
+scripts/build-web.sh
+web_name="pdf-merger-web-$tag"
+web_stage="$dist/$web_name"
+mkdir -p "$web_stage"
+cp -R web/. "$web_stage/"
+cp README.md "$web_stage/"
+(cd "$dist" && zip -qr "$web_name.zip" "$web_name")
+assets+=("$dist/$web_name.zip")
+
+(cd "$dist" && shasum -a 256 ./*.tar.gz ./*.zip > SHA256SUMS)
 assets+=("$dist/SHA256SUMS")
 
 if (( dry_run )); then

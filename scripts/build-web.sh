@@ -7,6 +7,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+want=$(awk '/^name = "wasm-bindgen"$/ {getline; gsub(/[^0-9.]/, "", $0); print; exit}' Cargo.lock)
+have=$(wasm-bindgen --version | awk '{print $2}')
+if [[ "$have" != "$want" ]]; then
+  echo "wasm-bindgen-cli is $have but Cargo.lock needs $want:" >&2
+  echo "  cargo install wasm-bindgen-cli --version $want --force" >&2
+  exit 1
+fi
+
 cargo rustc --release --lib --target wasm32-unknown-unknown --crate-type cdylib
 rm -rf web/pkg
 wasm-bindgen --target web --no-typescript --out-dir web/pkg \
