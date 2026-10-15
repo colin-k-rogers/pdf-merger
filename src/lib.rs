@@ -11,6 +11,9 @@ use std::collections::HashSet;
 use anyhow::{Context, Result, bail};
 use lopdf::{Bookmark, Document, Object, ObjectId, dictionary};
 
+#[cfg(target_arch = "wasm32")]
+mod wasm;
+
 /// Page attributes that a `Page` may inherit from its ancestor `Pages` nodes
 /// (PDF 32000-1:2008, section 7.7.3.4). These must be copied onto each page
 /// because the original page tree is discarded.

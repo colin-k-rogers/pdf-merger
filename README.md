@@ -30,6 +30,25 @@ Or from a local checkout:
 cargo install --path .
 ```
 
+## Web app (installable PWA)
+
+The same merge code compiles to WebAssembly and runs in the browser, so
+Chromebooks, phones, and desktops can merge PDFs with no install and no upload.
+Everything happens on the device, and once installed it works offline. Pick
+individual PDFs or a whole folder (its top-level PDFs, sorted by name), or drag
+either onto the page.
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.129   # must match Cargo.lock
+./scripts/build-web.sh
+python3 -m http.server -d web 8000                 # then open http://localhost:8000
+```
+
+Serve the `web/` directory from any static host over HTTPS (for example GitHub
+Pages) and Chrome will offer to install it. When you change files in `web/`,
+bump `CACHE` in `web/sw.js` so installed copies pick up the update.
+
 ## Usage
 
 ```bash
