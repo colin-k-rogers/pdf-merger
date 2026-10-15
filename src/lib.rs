@@ -1,9 +1,10 @@
 //! Merge many PDF documents into a single document.
 //!
-//! Each input is renumbered into a disjoint object-id range, its pages are
-//! re-parented under one new page tree (in input order), and its old
-//! catalog / page-tree / outline nodes are dropped. Unreferenced objects are
-//! pruned before the result is returned.
+//! For each input, only the objects reachable from its pages are copied,
+//! shifted into a disjoint object-id range, and the pages are re-parented
+//! under one new page tree (in input order). The inputs' old catalog,
+//! page-tree and outline nodes are left behind. Every step is linear in the
+//! number of objects, so merging many large files stays fast.
 
 use std::collections::HashSet;
 
@@ -27,8 +28,17 @@ pub struct MergeOptions {
     pub bookmarks: bool,
 }
 
+/// The merged document plus what happened to each input.
+pub struct Merged {
+    pub doc: Document,
+    /// Labels of the inputs that were merged, in order.
+    pub merged: Vec<String>,
+    /// Labels of inputs skipped because they have no pages.
+    pub skipped: Vec<String>,
+}
+
 /// Merge `inputs` in order into a single new document.
-pub fn merge(inputs: Vec<Input>, opts: MergeOptions) -> Result<Document> {
+pub fn merge(inputs: Vec<Input>, opts: MergeOptions) -> Result<Merged> {
     if inputs.is_empty() {
         bail!("no input documents given");
     }
@@ -42,17 +52,18 @@ pub fn merge(inputs: Vec<Input>, opts: MergeOptions) -> Result<Document> {
     let mut out = Document::with_version(version);
     let pages_id = out.new_object_id();
     let mut kids: Vec<Object> = Vec::new();
+    let mut merged = Vec::new();
+    let mut skipped = Vec::new();
 
     for Input { label, mut doc } in inputs {
-        doc.renumber_objects_with(out.max_id + 1);
-
         let page_ids: Vec<ObjectId> = doc.get_pages().into_values().collect();
         if page_ids.is_empty() {
-            eprintln!("warning: {label} has no pages; skipping");
+            skipped.push(label);
             continue;
         }
 
-        // Flatten inherited attributes onto each page before the tree goes away.
+        // Flatten inherited attributes onto each page and detach it from the
+        // old tree, so the reachability walk below doesn't pull the tree in.
         for &page_id in &page_ids {
             let inherited = collect_inherited(&doc, page_id);
             let page = doc
@@ -62,22 +73,35 @@ pub fn merge(inputs: Vec<Input>, opts: MergeOptions) -> Result<Document> {
             for (key, value) in inherited {
                 page.set(key, value);
             }
-            page.set("Parent", pages_id);
+            page.remove(b"Parent");
         }
 
-        let skip = structural_ids(&doc, &page_ids);
-        let max_id = doc.max_id;
-        for (id, obj) in doc.objects {
-            if !skip.contains(&id) {
-                out.objects.insert(id, obj);
+        let offset = out.max_id;
+        let shift = |id: ObjectId| (id.0 + offset, id.1);
+        for id in reachable(&doc, &page_ids) {
+            let Some(mut obj) = doc.objects.remove(&id) else {
+                continue;
+            };
+            shift_references(&mut obj, offset);
+            let new_id = shift(id);
+            out.max_id = out.max_id.max(new_id.0);
+            out.objects.insert(new_id, obj);
+        }
+
+        let page_ids: Vec<ObjectId> = page_ids.into_iter().map(shift).collect();
+        for &page_id in &page_ids {
+            if let Ok(page) = out.get_object_mut(page_id).and_then(Object::as_dict_mut) {
+                page.set("Parent", pages_id);
             }
         }
-        out.max_id = out.max_id.max(max_id);
-
         if opts.bookmarks {
-            out.add_bookmark(Bookmark::new(label, [0.0, 0.0, 0.0], 0, page_ids[0]), None);
+            out.add_bookmark(
+                Bookmark::new(label.clone(), [0.0, 0.0, 0.0], 0, page_ids[0]),
+                None,
+            );
         }
         kids.extend(page_ids.into_iter().map(Object::Reference));
+        merged.push(label);
     }
 
     if kids.is_empty() {
@@ -103,52 +127,97 @@ pub fn merge(inputs: Vec<Input>, opts: MergeOptions) -> Result<Document> {
     let catalog_id = out.add_object(catalog);
     out.trailer.set("Root", catalog_id);
 
-    out.prune_objects();
-    out.renumber_objects();
-    Ok(out)
+    Ok(Merged {
+        doc: out,
+        merged,
+        skipped,
+    })
 }
 
 /// Inheritable attributes missing from `page_id` but present on an ancestor.
+/// The nearest ancestor wins.
 fn collect_inherited(doc: &Document, page_id: ObjectId) -> Vec<(Vec<u8>, Object)> {
     let Ok(page) = doc.get_dictionary(page_id) else {
         return Vec::new();
     };
+    let mut missing: Vec<&[u8]> = INHERITABLE_ATTRS
+        .into_iter()
+        .filter(|k| !page.has(k))
+        .collect();
     let mut found = Vec::new();
     let mut seen = HashSet::from([page_id]);
     let mut parent = page.get(b"Parent").and_then(Object::as_reference).ok();
-    while let Some(parent_id) = parent {
-        if !seen.insert(parent_id) {
-            break; // malformed cyclic tree
-        }
+    while let Some(parent_id) = parent
+        && !missing.is_empty()
+        && seen.insert(parent_id)
+    {
         let Ok(node) = doc.get_dictionary(parent_id) else {
             break;
         };
-        for key in INHERITABLE_ATTRS {
-            let already = page.has(key) || found.iter().any(|(k, _): &(Vec<u8>, _)| k == key);
-            if !already && let Ok(value) = node.get(key) {
+        missing.retain(|key| match node.get(key) {
+            Ok(value) => {
                 found.push((key.to_vec(), value.clone()));
+                false
             }
-        }
+            Err(_) => true,
+        });
         parent = node.get(b"Parent").and_then(Object::as_reference).ok();
     }
     found
 }
 
-/// Ids of the old catalog, intermediate page-tree nodes and outline items,
-/// which are replaced by the merged document's own structure.
-fn structural_ids(doc: &Document, page_ids: &[ObjectId]) -> HashSet<ObjectId> {
-    let pages: HashSet<_> = page_ids.iter().copied().collect();
-    doc.objects
-        .iter()
-        .filter(|(id, obj)| {
-            !pages.contains(id)
-                && matches!(
-                    obj.type_name().unwrap_or(b""),
+/// Ids of every object reachable from `page_ids`, not crossing into the old
+/// catalog, page-tree or outline nodes (which the merged document replaces).
+fn reachable(doc: &Document, page_ids: &[ObjectId]) -> Vec<ObjectId> {
+    let mut seen: HashSet<ObjectId> = page_ids.iter().copied().collect();
+    let mut stack: Vec<ObjectId> = page_ids.to_vec();
+    let mut order = Vec::new();
+    while let Some(id) = stack.pop() {
+        let Ok(obj) = doc.get_object(id) else {
+            continue;
+        };
+        order.push(id);
+        collect_references(obj, &mut |child| {
+            let structural = doc.get_object(child).is_ok_and(|o| {
+                matches!(
+                    o.type_name().unwrap_or(b""),
                     b"Catalog" | b"Pages" | b"Outlines" | b"Outline"
                 )
-        })
-        .map(|(id, _)| *id)
-        .collect()
+            });
+            if !structural && seen.insert(child) {
+                stack.push(child);
+            }
+        });
+    }
+    order
+}
+
+fn collect_references(obj: &Object, f: &mut impl FnMut(ObjectId)) {
+    match obj {
+        Object::Reference(id) => f(*id),
+        Object::Array(items) => items.iter().for_each(|o| collect_references(o, f)),
+        Object::Dictionary(dict) => dict.iter().for_each(|(_, o)| collect_references(o, f)),
+        Object::Stream(stream) => stream
+            .dict
+            .iter()
+            .for_each(|(_, o)| collect_references(o, f)),
+        _ => {}
+    }
+}
+
+fn shift_references(obj: &mut Object, offset: u32) {
+    match obj {
+        Object::Reference(id) => id.0 += offset,
+        Object::Array(items) => items.iter_mut().for_each(|o| shift_references(o, offset)),
+        Object::Dictionary(dict) => dict
+            .iter_mut()
+            .for_each(|(_, o)| shift_references(o, offset)),
+        Object::Stream(stream) => stream
+            .dict
+            .iter_mut()
+            .for_each(|(_, o)| shift_references(o, offset)),
+        _ => {}
+    }
 }
 
 fn version_key(v: &str) -> (u32, u32) {
@@ -229,7 +298,8 @@ mod tests {
             ],
             MergeOptions::default(),
         )
-        .unwrap();
+        .unwrap()
+        .doc;
         assert_eq!(
             page_texts(&merged),
             ["A 0", "A 1", "B 0", "C 0", "C 1", "C 2"]
@@ -238,7 +308,9 @@ mod tests {
 
     #[test]
     fn copies_inherited_attributes_onto_pages() {
-        let merged = merge(vec![input("a", sample(2, "A"))], MergeOptions::default()).unwrap();
+        let merged = merge(vec![input("a", sample(2, "A"))], MergeOptions::default())
+            .unwrap()
+            .doc;
         for page_id in merged.get_pages().into_values() {
             let page = merged.get_dictionary(page_id).unwrap();
             assert!(page.has(b"MediaBox"));
@@ -252,7 +324,8 @@ mod tests {
             vec![input("a", sample(1, "A")), input("b", sample(1, "B"))],
             MergeOptions::default(),
         )
-        .unwrap();
+        .unwrap()
+        .doc;
         let mut buf = Vec::new();
         merged.save_to(&mut buf).unwrap();
         let reloaded = Document::load_mem(&buf).unwrap();
@@ -268,12 +341,45 @@ mod tests {
             ],
             MergeOptions { bookmarks: true },
         )
-        .unwrap();
+        .unwrap()
+        .doc;
         let catalog = merged.catalog().unwrap();
         let outlines = merged
             .get_dictionary(catalog.get(b"Outlines").unwrap().as_reference().unwrap())
             .unwrap();
         assert_eq!(outlines.get(b"Count").unwrap().as_i64().unwrap(), 2);
+    }
+
+    #[test]
+    fn reports_inputs_without_pages_as_skipped() {
+        let result = merge(
+            vec![input("a", sample(1, "A")), input("empty", sample(0, "E"))],
+            MergeOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(result.merged, ["a"]);
+        assert_eq!(result.skipped, ["empty"]);
+        assert_eq!(page_texts(&result.doc), ["A 0"]);
+    }
+
+    #[test]
+    fn leaves_old_catalogs_and_page_trees_behind() {
+        let merged = merge(
+            vec![input("a", sample(2, "A")), input("b", sample(2, "B"))],
+            MergeOptions::default(),
+        )
+        .unwrap()
+        .doc;
+        let count = |ty: &[u8]| {
+            merged
+                .objects
+                .values()
+                .filter(|o| o.type_name().is_ok_and(|t| t == ty))
+                .count()
+        };
+        assert_eq!(count(b"Catalog"), 1);
+        assert_eq!(count(b"Pages"), 1);
+        assert_eq!(count(b"Page"), 4);
     }
 
     #[test]

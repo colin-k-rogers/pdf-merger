@@ -42,7 +42,7 @@ Inputs are merged in the order given. A directory expands to the `.pdf` files in
 pdf-merger scans/ appendix.pdf -o report.pdf --bookmarks --compress
 ```
 
-Inputs can also come from a text file listing one path per line. Blank lines and lines starting with `#` are skipped, and relative paths resolve against the list file's own directory. Use `-` to read the list from stdin:
+Inputs can also come from a text file listing one path per line. Each line is taken exactly as written, spaces included. Blank lines and lines starting with `#` are skipped; write `./#1.pdf` to list a file whose name starts with `#`. Relative paths resolve against the list file's own directory. Use `-` to read the list from stdin (once per run):
 
 ```bash
 pdf-merger --list chapters.txt -o book.pdf
@@ -65,7 +65,7 @@ ls *.pdf | pdf-merger --list - -o merged.pdf
 
 ## How it works
 
-Each input is renumbered into its own object-id range. Its pages are re-parented under one new page tree, in input order. Inherited page attributes (`Resources`, `MediaBox`, `CropBox`, `Rotate`) are copied onto each page first, so pages keep their look once the old tree is gone. The old catalog, page tree and outlines are dropped, and unreferenced objects are pruned.
+For each input, only the objects reachable from its pages are copied, shifted into their own object-id range. The pages are re-parented under one new page tree, in input order. Every step is linear in the number of objects, so merging hundreds of files stays fast. Inherited page attributes (`Resources`, `MediaBox`, `CropBox`, `Rotate`) are copied onto each page first, so pages keep their look once the old tree is gone. The old catalog, page tree and outlines are left behind. The output is written to a temporary file and renamed into place, so a failed write never leaves a truncated file.
 
 ## Limitations
 
