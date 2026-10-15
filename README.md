@@ -4,6 +4,28 @@ A small Rust CLI that merges many PDF documents into a single PDF, built on [`lo
 
 ## Install
 
+### Prebuilt binary (Linux, including Chromebooks)
+
+On a Chromebook, first turn on Linux in Settings → Advanced → Developers → Linux development environment, then open the Terminal. Download the build matching `uname -m` (`x86_64` or `aarch64`) from the [latest release](https://github.com/colin-k-rogers/pdf-merger/releases/latest):
+
+```bash
+curl -L https://github.com/colin-k-rogers/pdf-merger/releases/latest/download/pdf-merger-$(uname -m)-unknown-linux-musl.tar.gz | tar xz
+sudo mv pdf-merger /usr/local/bin/
+pdf-merger --version
+```
+
+The binary is statically linked, so it has no dependencies. Files in your Chromebook's Downloads or Google Drive are visible to Linux under `/mnt/chromeos/` once you share the folder (Files app → right-click the folder → Share with Linux).
+
+### From source
+
+Requires a [Rust toolchain](https://rustup.rs) (on Debian/Chromebook, also `sudo apt install build-essential`):
+
+```bash
+cargo install --git https://github.com/colin-k-rogers/pdf-merger
+```
+
+Or from a local checkout:
+
 ```bash
 cargo install --path .
 ```
