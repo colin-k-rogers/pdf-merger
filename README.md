@@ -51,6 +51,9 @@ Pages) and Chrome will offer to install it. The service worker is network-first,
 so online users always get the latest files; bump `CACHE` in `web/sw.js` only if
 you change its precache list.
 
+Once Pages is enabled (below), every merge to `main` that touches the app
+deploys it automatically, so users just open the URL, no build needed.
+
 Each [release](https://github.com/colin-k-rogers/pdf-merger/releases/latest)
 also includes `pdf-merger-web-<version>.zip`: the built app, ready to unzip onto
 any static HTTPS host. (Opening `index.html` straight from disk won't work,
@@ -97,3 +100,18 @@ For each input, only the objects reachable from its pages are copied, shifted in
 
 - Encrypted PDFs are rejected; decrypt them first.
 - The inputs' existing bookmarks, form fields (AcroForm), and named destinations are not carried over.
+
+## Releasing
+
+Releases are built in CI, so nothing needs compiling locally:
+
+1. Bump `version` in `Cargo.toml`, commit, and merge to `main`.
+2. Tag and push: `git tag v<version> && git push origin v<version>`.
+
+The [Release workflow](.github/workflows/release.yml) builds the static Linux
+binaries and the web zip and publishes the GitHub release. You can also run it
+from the Actions tab to build without publishing. `scripts/release.sh` does the
+same thing locally if you prefer (needs zig, cargo-zigbuild, wasm-bindgen-cli).
+
+One-time setup for the hosted web app: Settings → Pages → Source: **GitHub
+Actions**. The [Pages workflow](.github/workflows/pages.yml) then deploys `web/`.

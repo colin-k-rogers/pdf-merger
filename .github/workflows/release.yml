@@ -1,0 +1,55 @@
+# Push a tag like v0.3.0 (matching the version in Cargo.toml) to build the
+# static Linux binaries and the web app zip and publish a GitHub release.
+# Run it by hand from the Actions tab to build without publishing; the assets
+# are attached to the run as an artifact.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+
+      - name: Find wasm-bindgen version in Cargo.lock
+        id: wb
+        run: echo "version=$(awk '/^name = "wasm-bindgen"$/ {getline; gsub(/[^0-9.]/, ""); print; exit}' Cargo.lock)" >> "$GITHUB_OUTPUT"
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild,wasm-bindgen-cli@${{ steps.wb.outputs.version }}
+
+      - run: scripts/release.sh --build-only
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            target/dist/*.tar.gz
+            target/dist/*.zip
+            target/dist/SHA256SUMS
+
+  publish:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
