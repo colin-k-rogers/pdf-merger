@@ -11,6 +11,8 @@ const els = {
 /** @type {File[]} Files to merge, in order. */
 let files = [];
 let busy = false;
+// A Rust panic traps the WASM module for good; only a page reload recovers.
+let engineDead = false;
 
 const ready = init();
 
@@ -146,7 +148,7 @@ function render() {
       return li;
     }),
   );
-  els.merge.disabled = busy || files.length === 0;
+  els.merge.disabled = busy || engineDead || files.length === 0;
   els.clear.disabled = busy || files.length === 0;
 }
 
@@ -165,13 +167,16 @@ async function mergeAll() {
   busy = true;
   render();
   setStatus("Merging…");
+  let stage = "while starting";
   try {
     await ready;
     const merger = new Merger();
     try {
       for (const file of files) {
+        stage = `while reading ${file.name}`;
         merger.add(file.name, new Uint8Array(await file.arrayBuffer()));
       }
+      stage = "while combining the files";
       const bytes = merger.finish(els.bookmarks.checked);
       const skipped = merger.skipped();
       download(bytes, "merged.pdf");
@@ -181,10 +186,22 @@ async function mergeAll() {
           : `Done. Merged ${files.length} file(s) into merged.pdf (${formatSize(bytes.length)}).`,
       );
     } finally {
-      merger.free();
+      try {
+        merger.free();
+      } catch {
+        // After a trap the object is unusable; don't let that hide the real error.
+      }
     }
   } catch (err) {
-    setStatus(err?.message ?? String(err), true);
+    if (err instanceof WebAssembly.RuntimeError) {
+      engineDead = true;
+      setStatus(
+        `The PDF engine crashed ${stage}. Reload the page to continue; if it happens again, leave that file out.`,
+        true,
+      );
+    } else {
+      setStatus(err?.message ?? String(err), true);
+    }
   } finally {
     busy = false;
     render();

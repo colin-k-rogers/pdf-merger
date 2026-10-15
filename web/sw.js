@@ -32,9 +32,12 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     fetch(request, { cache: "no-cache" })
       .then((response) => {
-        if (response.ok) {
+        // Only full 200s are cacheable (cache.put rejects 206 partials). waitUntil
+        // keeps the worker alive until the write lands, or it could be killed
+        // right after the response is returned and the cache would go stale.
+        if (response.status === 200) {
           const copy = response.clone();
-          caches.open(CACHE).then((c) => c.put(request, copy));
+          event.waitUntil(caches.open(CACHE).then((c) => c.put(request, copy)));
         }
         return response;
       })

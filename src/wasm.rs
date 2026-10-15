@@ -18,6 +18,8 @@ pub struct Merger {
 impl Merger {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Merger {
+        // A Rust panic traps the whole module; at least log its message.
+        console_error_panic_hook::set_once();
         Merger::default()
     }
 

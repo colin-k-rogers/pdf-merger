@@ -6,6 +6,7 @@
 #   --build-only  same, minus the tag checks; used by CI, which publishes the
 #                 assets itself (.github/workflows/release.yml)
 # Normally you don't run this: bump the version, then push a tag and CI does it.
+# Running it without flags also works (CI then just uploads into your release).
 # Needs: rustup, zig, cargo-zigbuild, wasm-bindgen-cli (version from Cargo.lock),
 # zip, gh (authenticated).
 #   brew install zig gh && cargo install cargo-zigbuild
@@ -79,4 +80,7 @@ fi
 
 git tag "$tag"
 git push origin "$tag"
-gh release create "$tag" "${assets[@]}" --title "$tag" --generate-notes
+# Pushing the tag also starts the CI Release workflow, which publishes the same
+# release; whichever gets there second uploads into the existing one.
+gh release create "$tag" "${assets[@]}" --title "$tag" --generate-notes \
+  || gh release upload "$tag" "${assets[@]}" --clobber
