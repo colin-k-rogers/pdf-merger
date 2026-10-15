@@ -115,3 +115,7 @@ same thing locally if you prefer (needs zig, cargo-zigbuild, wasm-bindgen-cli).
 
 One-time setup for the hosted web app: Settings → Pages → Source: **GitHub
 Actions**. The [Pages workflow](.github/workflows/pages.yml) then deploys `web/`.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
